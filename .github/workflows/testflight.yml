@@ -1,0 +1,150 @@
+name: TestFlight
+
+# Started only by the repository owner, on main. Secrets are not exposed to
+# pull requests. Third-party actions are pinned. The IPA stays on the runner.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: diagnose reads Apple and the existing certificate; bootstrap prepares this app's profile; release uploads
+        type: choice
+        options:
+          - diagnose
+          - bootstrap
+          - release
+        default: release
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nofap-testflight
+  cancel-in-progress: false
+
+jobs:
+  ship:
+    if: github.ref == 'refs/heads/main' && github.actor == github.repository_owner
+    name: Test, sign and upload
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      FASTLANE_SKIP_UPDATE_CHECK: "1"
+      FASTLANE_HIDE_CHANGELOG: "1"
+      FASTLANE_OPT_OUT_USAGE: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Reject secret-shaped files
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -E '\.(p8|p12|mobileprovision|cer|pem|env)$'; then
+            echo "Refusing to run with key or profile files in the public tree."
+            exit 1
+          fi
+
+      - name: Select Xcode 26.6
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_26.6.app
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Set up Ruby and fastlane
+        uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+
+      - name: Check release tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -c fastlane/Fastfile
+          ruby -c ci/signing_identity.rb
+          bundle exec ruby ci/test_profile_certificates.rb
+          python3 ci/test_release_plists.py
+
+      - name: Generate the Xcode project
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Run unit tests
+        timeout-minutes: 25
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/logs
+          DEVICE_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(d["udid"] for runtime in data["devices"].values() for d in runtime if d.get("isAvailable") and "iPhone" in d.get("name","")))')"
+          xcrun simctl boot "$DEVICE_ID" || true
+          xcodebuild test \
+            -project NoFap.xcodeproj \
+            -scheme NoFap \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            > build/logs/unit-tests.log 2>&1 || {
+              tail -n 200 build/logs/unit-tests.log
+              exit 1
+            }
+          grep -E "Executed [0-9]+ tests" build/logs/unit-tests.log | tail -n 1
+
+      - name: Prepare Apple API key
+        if: inputs.action == 'diagnose' || inputs.action == 'bootstrap' || inputs.action == 'release'
+        run: python3 ci/prepare_apple_key.py
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+
+      - name: Prepare read-only access to the private signing store
+        if: inputs.action == 'diagnose' || inputs.action == 'bootstrap' || inputs.action == 'release'
+        shell: bash
+        env:
+          SIGNING_DEPLOY_KEY: ${{ secrets.SIGNING_DEPLOY_KEY }}
+          SIGNING_STORE_URL: ${{ secrets.SIGNING_STORE_URL }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SIGNING_STORE_URL"
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$SIGNING_DEPLOY_KEY" > "$HOME/.ssh/nofap_signing"
+          chmod 600 "$HOME/.ssh/nofap_signing"
+          echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' >> "$HOME/.ssh/known_hosts"
+          printf 'Host github.com\n  IdentityFile ~/.ssh/nofap_signing\n  IdentitiesOnly yes\n' >> "$HOME/.ssh/config"
+
+      - name: Diagnose, bootstrap or release
+        timeout-minutes: 50
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ inputs.action }}" in
+            diagnose) bundle exec fastlane ios diagnose ;;
+            bootstrap) bundle exec fastlane ios bootstrap ;;
+            release) bundle exec fastlane ios release_testflight ;;
+            *) echo "Unknown action" >&2; exit 1 ;;
+          esac
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD_NEXT }}
+          SIGNING_CERTIFICATE_ID: ${{ secrets.SIGNING_CERTIFICATE_ID }}
+          SIGNING_STORE_URL: ${{ secrets.SIGNING_STORE_URL }}
+
+      - name: Remove temporary keys and keychain
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$HOME/.ssh/nofap_signing"
+          rm -rf "$RUNNER_TEMP/nofap-asc" "$RUNNER_TEMP/nofap-profile"
+          if [[ -f "$HOME/Library/Keychains/fastlane_tmp_keychain-db" ]]; then
+            security delete-keychain "$HOME/Library/Keychains/fastlane_tmp_keychain-db" || true
+          fi

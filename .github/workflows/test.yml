@@ -1,0 +1,86 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nofap-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Unit tests on iOS Simulator
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Reject secret-shaped files
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -E '\.(p8|p12|mobileprovision|cer|pem|env)$'; then
+            echo "Refusing to test a tree that contains key or profile files."
+            exit 1
+          fi
+
+      - name: Select Xcode 26.6
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_26.6.app
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcrun --sdk iphonesimulator --show-sdk-version
+
+      - name: Set up Ruby and fastlane
+        uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+
+      - name: Check release tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -c fastlane/Fastfile
+          ruby -c ci/signing_identity.rb
+          bundle exec ruby ci/test_profile_certificates.rb
+          python3 ci/test_release_plists.py
+
+      - name: Generate the Xcode project
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          xcodegen generate
+          test -d NoFap.xcodeproj
+
+      - name: Run unit tests
+        timeout-minutes: 25
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/logs
+          DEVICE_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(d["udid"] for runtime in data["devices"].values() for d in runtime if d.get("isAvailable") and "iPhone" in d.get("name","")))')"
+          xcrun simctl boot "$DEVICE_ID" || true
+          xcodebuild test \
+            -project NoFap.xcodeproj \
+            -scheme NoFap \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            > build/logs/unit-tests.log 2>&1 || {
+              tail -n 200 build/logs/unit-tests.log
+              exit 1
+            }
+          grep -E "Executed [0-9]+ tests" build/logs/unit-tests.log | tail -n 1

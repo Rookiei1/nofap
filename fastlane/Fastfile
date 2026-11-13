@@ -1,0 +1,262 @@
+require "shellwords"
+require "fileutils"
+require "tmpdir"
+
+default_platform(:ios)
+
+# Public repository. The signing repository URL, certificate id and passwords
+# come from GitHub Actions secrets. This file does not contain them.
+
+APP_BUNDLE_ID = "com.rookiei1.nofap"
+APP_SKU = "nofap-iphone-001"
+MATCH_BRANCH = "signing-assets-v2"
+PROJECT_ROOT = File.expand_path("..", File.dirname(__FILE__))
+require File.join(PROJECT_ROOT, "ci", "signing_identity")
+
+def append_summary(text)
+  path = ENV["GITHUB_STEP_SUMMARY"]
+  File.open(path, "a") { |file| file.puts(text) } unless path.to_s.empty?
+  UI.message(text)
+end
+
+def raise_if_agreement(error)
+  message = error.to_s
+  return unless message.include?("REQUIRED_AGREEMENTS") || message.include?("required agreement")
+  UI.user_error!(<<~MSG)
+    Apple 返回 REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED。账号里有一份必须接受的协议缺失或过期，签名和上传因此停住。
+    打开 https://appstoreconnect.apple.com/business
+    路径：App Store Connect → 商务（Business）→ 协议、税务和银行业务。用账号持有人查看并接受当前提示的协议。
+    当前项目：平台 iOS；名称 NoFap（若重名则用 掌控此刻）；主要语言 简体中文 zh-Hans；Bundle ID com.rookiei1.nofap；SKU nofap-iphone-001。
+    完成标准：该页面不再提示必须处理的协议，并且 App Store Connect API 能读到应用列表。
+    不要把密码、验证码或 API 密钥发到聊天。完成后回复「已完成」。
+  MSG
+end
+
+def apple_call
+  yield
+rescue => error
+  raise_if_agreement(error)
+  raise
+end
+
+platform :ios do
+  private_lane :apple_api do
+    ensure_env_vars(env_vars: ["ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_KEY_PATH"])
+    app_store_connect_api_key(
+      key_id: ENV.fetch("ASC_KEY_ID"),
+      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+      key_filepath: ENV.fetch("ASC_KEY_PATH"),
+      duration: 1200,
+      in_house: false
+    )
+  end
+
+  private_lane :registration_report do
+    bundle = apple_call { Spaceship::ConnectAPI::BundleId.find(APP_BUNDLE_ID) }
+    app = apple_call { Spaceship::ConnectAPI::App.find(APP_BUNDLE_ID) }
+    missing = []
+    if bundle.nil?
+      missing << "Developer App ID 未注册。打开 https://developer.apple.com/account/resources/identifiers/list → ＋ → App IDs → App → Continue。Description：NoFap。Bundle ID：Explicit，com.rookiei1.nofap。Capabilities：不勾选。Register 后列表里能看到这条。"
+    end
+    if app.nil?
+      missing << "App Store Connect 应用记录未创建。打开 https://appstoreconnect.apple.com/apps → ＋ → New App。平台 iOS；名称 NoFap；主要语言 简体中文；Bundle ID com.rookiei1.nofap；SKU nofap-iphone-001。创建后应用出现在当前团队列表。Developer App ID 不能代替这份记录。"
+    end
+    { bundle: bundle, app: app, missing: missing }
+  end
+
+  private_lane :ensure_registration do |options|
+    report = registration_report
+    if report[:bundle].nil?
+      apple_call do
+        Spaceship::ConnectAPI::BundleId.create(
+          name: "NoFap",
+          platform: "IOS",
+          identifier: APP_BUNDLE_ID
+        )
+      end
+      append_summary("Created Developer App ID `#{APP_BUNDLE_ID}` with no extra capabilities.")
+    end
+    if report[:app].nil?
+      created_name = nil
+      ["NoFap", "掌控此刻"].each do |name|
+        begin
+          apple_call do
+            produce(
+              api_key: options.fetch(:api_key),
+              app_identifier: APP_BUNDLE_ID,
+              app_name: name,
+              language: "zh-Hans",
+              app_version: "1.0.0",
+              sku: APP_SKU,
+              platforms: ["ios"],
+              skip_devcenter: true
+            )
+          end
+          created_name = name
+          break
+        rescue => error
+          raise_if_agreement(error)
+          UI.important("Could not create App Store Connect record named #{name}.")
+        end
+      end
+      if created_name.nil?
+        UI.user_error!("App Store Connect 记录仍未创建。请到 https://appstoreconnect.apple.com/apps 手动新建：平台 iOS，名称 NoFap 或 掌控此刻，语言简体中文，Bundle ID #{APP_BUNDLE_ID}，SKU #{APP_SKU}。")
+      end
+      append_summary("Created App Store Connect record `#{created_name}` / `#{APP_SKU}`.")
+    end
+  end
+
+  desc "Read Apple registration and the existing signing identity. Do not create or upload."
+  lane :diagnose do
+    api_key = apple_api
+    report = registration_report
+    identity = install_existing_identity(api_key: api_key)
+    if report[:missing].empty?
+      append_summary("### Diagnosis passed\n- Bundle ID `#{APP_BUNDLE_ID}`\n- App Store Connect app `#{report[:app].id}`\n- Existing distribution identity for Team `#{identity[:team_id]}` decrypted and matched. No certificate was created.")
+      UI.success("Read-only diagnosis passed.")
+    else
+      append_summary("### Registration still required\n" + report[:missing].map { |item| "- #{item}" }.join("\n"))
+      UI.user_error!("Registration is incomplete:\n" + report[:missing].join("\n"))
+    end
+  end
+
+  private_lane :install_existing_identity do |options|
+    ensure_env_vars(env_vars: ["MATCH_PASSWORD", "SIGNING_CERTIFICATE_ID", "SIGNING_STORE_URL"])
+    certificate_id = ENV.fetch("SIGNING_CERTIFICATE_ID")
+    remote = apple_call { Spaceship::ConnectAPI::Certificate.get(certificate_id: certificate_id) }
+    UI.user_error!("The signing certificate is not available in this Apple Team. Refusing to create a new one.") if remote.nil?
+    UI.user_error!("Expected a valid existing Distribution certificate. Refusing to create or revoke one.") unless remote.valid? && ["DISTRIBUTION", "IOS_DISTRIBUTION"].include?(remote.certificate_type)
+    setup_ci(timeout: 0) if ENV["CI"]
+    ENV["MATCH_READONLY"] = "true"
+    keychain_name = ENV.fetch("MATCH_KEYCHAIN_NAME", "login.keychain")
+    keychain_path = FastlaneCore::Helper.keychain_path(keychain_name)
+    raw = Dir.mktmpdir("nofap-identity-", ENV.fetch("RUNNER_TEMP", Dir.tmpdir))
+    begin
+      match(
+        type: "appstore",
+        platform: "ios",
+        app_identifier: [APP_BUNDLE_ID],
+        api_key: options.fetch(:api_key),
+        git_url: ENV.fetch("SIGNING_STORE_URL"),
+        git_branch: MATCH_BRANCH,
+        clone_branch_directly: true,
+        readonly: true,
+        certificate_id: certificate_id,
+        skip_provisioning_profiles: true,
+        renew_expired_certs: false,
+        output_path: raw,
+        keychain_name: keychain_name,
+        keychain_password: ENV.fetch("MATCH_KEYCHAIN_PASSWORD", ""),
+        skip_docs: true
+      )
+      identity = NoFapSigning.verify_identity(
+        raw: raw,
+        cert_id: certificate_id,
+        apple_certificate: remote.certificate_content,
+        keychain: keychain_path
+      )
+      append_summary("### Existing identity verified\nThe saved distribution certificate decrypted, matched Apple's current certificate and private key, and passed a codesign probe. No certificate was created, renewed or revoked.")
+      identity
+    ensure
+      FileUtils.remove_entry_secure(raw) if raw && File.directory?(raw)
+    end
+  end
+
+  private_lane :prepare_app_profile do |options|
+    identity = options.fetch(:identity)
+    directory = File.join(ENV.fetch("RUNNER_TEMP", Dir.tmpdir), "nofap-profile")
+    FileUtils.mkdir_p(directory, mode: 0o700)
+    get_provisioning_profile(
+      api_key: options.fetch(:api_key),
+      app_identifier: APP_BUNDLE_ID,
+      platform: "ios",
+      cert_id: ENV.fetch("SIGNING_CERTIFICATE_ID"),
+      force: false,
+      skip_certificate_verification: false,
+      skip_install: true,
+      output_path: directory,
+      filename: "NoFap.mobileprovision"
+    )
+    path = lane_context[SharedValues::SIGH_PROFILE_PATH]
+    UI.user_error!("App Store profile was not written") if path.to_s.empty? || !File.file?(path)
+    profile = NoFapSigning.verify_profile(path: path, bundle_id: APP_BUNDLE_ID, identity: identity)
+    FastlaneCore::ProvisioningProfile.install(path)
+    append_summary("### App profile ready\nProfile prepared for `#{APP_BUNDLE_ID}` with the existing certificate. No new certificate was created.")
+    { team_id: identity.fetch(:team_id), fingerprint: identity.fetch(:fingerprint), profile_name: profile.fetch("Name") }
+  end
+
+  desc "Create this app's App ID and profile if needed, using the existing certificate."
+  lane :bootstrap do
+    api_key = apple_api
+    ensure_registration(api_key: api_key)
+    identity = install_existing_identity(api_key: api_key)
+    prepare_app_profile(api_key: api_key, identity: identity)
+    UI.success("Bootstrap finished. Nothing was uploaded and no certificate was created.")
+  end
+
+  desc "Sign the iPhone app with the existing identity and upload to TestFlight."
+  lane :release_testflight do
+    api_key = apple_api
+    ensure_registration(api_key: api_key)
+    identity = install_existing_identity(api_key: api_key)
+    signing = prepare_app_profile(api_key: api_key, identity: identity)
+
+    project_path = File.join(PROJECT_ROOT, "NoFap.xcodeproj")
+    archive_path = File.join(PROJECT_ROOT, "build", "NoFap.xcarchive")
+    ipa_directory = File.join(PROJECT_ROOT, "build", "ios", "ipa")
+    version = get_version_number(xcodeproj: project_path, target: "NoFap")
+    latest = latest_testflight_build_number(
+      api_key: api_key,
+      app_identifier: APP_BUNDLE_ID,
+      version: version,
+      initial_build_number: 0
+    )
+    build_number = [latest.to_i + 1, ENV.fetch("GITHUB_RUN_NUMBER", "1").to_i].max
+    xcargs = {
+      "DEVELOPMENT_TEAM" => signing[:team_id],
+      "CURRENT_PROJECT_VERSION" => build_number.to_s,
+      "CODE_SIGN_STYLE" => "Manual",
+      "CODE_SIGN_IDENTITY" => signing[:fingerprint],
+      "NOFAP_PROFILE" => signing[:profile_name]
+    }.map { |key, value| "#{key}=#{value.shellescape}" }.join(" ")
+
+    build_app(
+      project: project_path,
+      scheme: "NoFap",
+      clean: true,
+      export_method: "app-store",
+      archive_path: archive_path,
+      output_directory: ipa_directory,
+      output_name: "NoFap.ipa",
+      buildlog_path: File.join(PROJECT_ROOT, "build", "logs"),
+      skip_profile_detection: true,
+      xcargs: xcargs,
+      export_options: {
+        signingStyle: "manual",
+        signingCertificate: signing[:fingerprint],
+        teamID: signing[:team_id],
+        provisioningProfiles: {
+          APP_BUNDLE_ID => signing[:profile_name]
+        }
+      }
+    )
+
+    sh(
+      "python3", File.join(PROJECT_ROOT, "ci", "verify_release.py"),
+      "--archive", archive_path,
+      "--ipa", File.join(ipa_directory, "NoFap.ipa"),
+      "--team-id", signing[:team_id],
+      "--version", version,
+      "--build-number", build_number.to_s
+    )
+
+    fresh_api_key = apple_api
+    upload_to_testflight(
+      api_key: fresh_api_key,
+      app_identifier: APP_BUNDLE_ID,
+      ipa: File.join(ipa_directory, "NoFap.ipa"),
+      skip_waiting_for_build_processing: false
+    )
+    append_summary("### TestFlight upload complete\nVersion #{version}, build #{build_number}. This is not App Store release.")
+  end
+end
