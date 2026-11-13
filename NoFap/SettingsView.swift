@@ -128,6 +128,13 @@ struct SettingsView: View {
         }
     }
 
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .tracking(1.5)
+            .foregroundStyle(Obsidian.faint)
+    }
+
     private var reminderBinding: Binding<Bool> {
         Binding(
             get: { store.reminderEnabled },
