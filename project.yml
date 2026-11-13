@@ -17,6 +17,7 @@ targets:
     sources:
       - path: NoFap
     info:
+      path: NoFap/Info.plist
       properties:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
