@@ -45,7 +45,10 @@ print(regular["name"].replace(" ", "-"))
 print(small["udid"])
 print(small["name"].replace(" ", "-"))
 PY
-mapfile -t PICKED < "$OUT/devices.txt"
+PICKED=()
+while IFS= read -r line; do
+  PICKED+=("$line")
+done < "$OUT/devices.txt"
 
 shoot() {
   local udid="$1"
