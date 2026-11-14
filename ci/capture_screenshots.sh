@@ -15,7 +15,7 @@ if [[ -z "$APP" ]]; then
   exit 1
 fi
 
-mapfile -t PICKED < <(python3 - <<'PY'
+python3 - <<'PY' > "$OUT/devices.txt"
 import json, subprocess
 data = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"]))
 phones = []
@@ -45,7 +45,7 @@ print(regular["name"].replace(" ", "-"))
 print(small["udid"])
 print(small["name"].replace(" ", "-"))
 PY
-)
+mapfile -t PICKED < "$OUT/devices.txt"
 
 shoot() {
   local udid="$1"
