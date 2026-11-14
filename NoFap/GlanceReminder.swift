@@ -2,7 +2,7 @@ import Foundation
 import UserNotifications
 
 enum GlanceNotice {
-    static let title = "NoFap"
+    static let title = "NF"
     static let body = "时间还在往前走。打开就能看到，这不是打卡。"
     static let identifier = "nofap.glance"
 }

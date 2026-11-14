@@ -124,9 +124,9 @@ struct HomeView: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("NOFAP")
-                    .font(.system(size: 18, weight: .medium))
-                        .tracking(5)
+                    Text("NF")
+                        .font(.system(size: 20, weight: .semibold))
+                        .tracking(4)
                         .foregroundStyle(Obsidian.silver)
                     Text("/")
                         .font(.system(size: 20, weight: .medium))
@@ -294,7 +294,7 @@ private struct InfoSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("NoFap 从你开始的那一秒持续计时，精确到秒。")
+                    Text("NF 从你开始的那一秒持续计时，精确到秒。")
                     Text("天数按每满 24 小时计算，剩下的显示为时、分、秒。跨过午夜或切换时区，都不会额外加一天。")
                     Text("锁屏、切到后台、退出或重启之后，用保存的开始时间重新计算。前台每秒刷新；系统不会让 App 在后台永远每秒运行。")
                     Text("点「重新开始」并确认后，上一轮的开始、结束和持续秒数记入轨迹。新一轮从确认的那一秒归零，然后继续走。最近一次可以撤销。")
