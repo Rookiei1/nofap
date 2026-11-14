@@ -29,7 +29,7 @@ final class HomeUITests: XCTestCase {
         app.buttons["取消"].tap()
         let footer = app.staticTexts["local-records-footer"]
         for _ in 0..<4 {
-            if footer.isHittable { break }
+            if footer.isHittable && footer.frame.maxY <= app.buttons["tab-settings"].frame.minY { break }
             app.swipeUp()
         }
         XCTAssertTrue(footer.isHittable)

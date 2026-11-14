@@ -11,8 +11,7 @@ struct RootView: View {
     @State private var section: AppSection = .timer
 
     var body: some View {
-        ZStack {
-            Obsidian.background.ignoresSafeArea()
+        Group {
             switch section {
             case .timer:
                 HomeView(store: store, section: $section)
@@ -22,6 +21,7 @@ struct RootView: View {
                 SettingsView(store: store, section: $section)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             AppTabBar(section: $section)
                 .padding(.horizontal, 24)
@@ -32,6 +32,7 @@ struct RootView: View {
                     Rectangle().fill(Obsidian.line.opacity(0.5)).frame(height: 0.5)
                 }
         }
+        .background(Obsidian.background.ignoresSafeArea())
         .preferredColorScheme(.dark)
     }
 }
