@@ -22,6 +22,16 @@ struct RootView: View {
                 SettingsView(store: store, section: $section)
             }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            AppTabBar(section: $section)
+                .padding(.horizontal, 24)
+                .padding(.top, 8)
+                .padding(.bottom, 6)
+                .background(Obsidian.background)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(Obsidian.line.opacity(0.5)).frame(height: 0.5)
+                }
+        }
         .preferredColorScheme(.dark)
     }
 }
@@ -30,12 +40,11 @@ struct AppTabBar: View {
     @Binding var section: AppSection
 
     var body: some View {
-        HStack {
+        HStack(spacing: 0) {
             tab(.timer, "计时", "timer")
             tab(.history, "轨迹", "chart.xyaxis.line")
             tab(.settings, "设置", "gearshape")
         }
-        .padding(.top, 8)
     }
 
     private func tab(_ value: AppSection, _ title: String, _ symbol: String) -> some View {
@@ -43,19 +52,26 @@ struct AppTabBar: View {
         return Button {
             section = value
         } label: {
-            VStack(spacing: 4) {
-                Circle()
-                    .fill(selected ? Obsidian.lava : Color.clear)
-                    .frame(width: 5, height: 5)
+            VStack(spacing: 6) {
                 Image(systemName: symbol)
-                    .font(.system(size: 18, weight: .regular))
+                    .font(.system(size: 21, weight: .light))
+                    .frame(height: 25)
+                    .overlay(alignment: .topTrailing) {
+                        if selected {
+                            Circle().fill(Obsidian.lava).frame(width: 4, height: 4)
+                                .offset(x: 7, y: -2)
+                        }
+                    }
                 Text(title)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.caption2.weight(.medium))
             }
             .foregroundStyle(selected ? Color.white : Obsidian.faint)
             .frame(maxWidth: .infinity)
+            .frame(minHeight: 52)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier("tab-\(value)")
     }
 }

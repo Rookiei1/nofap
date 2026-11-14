@@ -16,97 +16,87 @@ struct SettingsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                Text("设置")
-                    .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(Obsidian.silver)
-                sectionTitle("计时起点")
-                Text(ElapsedTime.startCaption(start: store.currentStart, now: Date()))
-                    .font(.title3.monospacedDigit())
-                    .foregroundStyle(.white)
-                Text("改起点会按新的开始时间重算这一轮，不会另记一档。重新开始才会把上一轮归档。")
-                    .font(.footnote)
-                    .foregroundStyle(Obsidian.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button("修改开始时间") {
-                    draftDate = store.currentStart
-                    draftSecond = Calendar.current.component(.second, from: store.currentStart)
-                    editingStart = true
+            VStack(alignment: .leading, spacing: 28) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("设置").font(.system(size: 32, weight: .semibold))
+                    Text("按自己的节奏继续。")
+                        .font(.subheadline).foregroundStyle(Obsidian.muted)
                 }
-                .buttonStyle(ObsidianButtonStyle())
-
-                if store.undo != nil {
-                    Button("撤销最近一次重新开始") {
-                        if case .success = store.undoRestart() {
-                            message = "已回到上一轮的开始时间。"
+                settingsGroup("计时起点") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(ElapsedTime.startCaption(start: store.currentStart, now: Date()))
+                            .font(.callout.monospacedDigit())
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("修改起点会重算这一轮。只有重新开始，才会归档上一轮。")
+                            .font(.footnote).foregroundStyle(Obsidian.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.bottom, 4)
+                    rowDivider
+                    actionRow("修改开始时间", symbol: "calendar") {
+                        draftDate = store.currentStart
+                        draftSecond = Calendar.current.component(.second, from: store.currentStart)
+                        editingStart = true
+                    }
+                    if store.undo != nil {
+                        rowDivider
+                        actionRow("撤销最近一次重新开始", symbol: "arrow.uturn.backward") {
+                            if case .success = store.undoRestart() {
+                                message = "已回到上一轮的开始时间。"
+                            }
                         }
                     }
-                    .buttonStyle(ObsidianButtonStyle())
                 }
-
-                sectionTitle("提醒")
-                Toggle(isOn: reminderBinding) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("到点看一眼")
-                        Text("可选。关掉或拒绝通知，计时一样继续。这不是每天要完成的打卡。")
-                            .font(.footnote)
-                            .foregroundStyle(Obsidian.muted)
+                settingsGroup("可选提醒") {
+                    Toggle("到点看一眼", isOn: reminderBinding)
+                        .font(.body).tint(Obsidian.lava).frame(minHeight: 44)
+                    Text("给自己一个轻提醒。关掉或拒绝通知，计时一样继续。")
+                        .font(.footnote).foregroundStyle(Obsidian.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if store.reminderEnabled {
+                        rowDivider
+                        DatePicker("提醒时间", selection: reminderTime, displayedComponents: .hourAndMinute)
+                            .datePickerStyle(.compact)
+                    }
+                    if reminderDenied {
+                        Text("通知没有打开，计时不受影响。")
+                            .font(.footnote).foregroundStyle(Obsidian.muted)
                     }
                 }
-                .tint(Obsidian.lava)
-                if store.reminderEnabled {
-                    DatePicker(
-                        "时间",
-                        selection: reminderTime,
-                        displayedComponents: .hourAndMinute
-                    )
-                    .datePickerStyle(.compact)
+                settingsGroup("停一下，再继续") {
+                    actionRow("开始呼吸", symbol: "wind") { showingBreath = true }
+                    Text("留一点空间给自己。呼吸时，计时照常继续。")
+                        .font(.footnote).foregroundStyle(Obsidian.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                if reminderDenied {
-                    Text("通知没有打开。计时不受影响。")
-                        .font(.footnote)
-                        .foregroundStyle(Obsidian.muted)
-                }
-
-                sectionTitle("呼吸")
-                Text("需要停一下时可以用。它不暂停、也不重置计时。")
-                    .font(.footnote)
-                    .foregroundStyle(Obsidian.muted)
-                Button("开始呼吸") { showingBreath = true }
-                    .buttonStyle(ObsidianButtonStyle())
-
-                sectionTitle("这台手机上的记录")
-                Button("导出记录") {
-                    if let data = try? store.exportData() {
-                        exportPayload = ExportPayload(data: data)
-                    } else {
-                        message = "导出没有成功。"
+                settingsGroup("本机记录") {
+                    actionRow("导出记录", symbol: "square.and.arrow.up") {
+                        if let data = try? store.exportData() {
+                            exportPayload = ExportPayload(data: data)
+                        } else {
+                            message = "导出没有成功。"
+                        }
+                    }
+                    rowDivider
+                    actionRow("清除本机记录", symbol: "trash", destructive: true) {
+                        confirmingErase = true
                     }
                 }
-                .buttonStyle(ObsidianButtonStyle())
-                Button("清除本机记录") { confirmingErase = true }
-                    .buttonStyle(ObsidianButtonStyle(role: .destructive))
                 if !message.isEmpty {
-                    Text(message)
-                        .font(.footnote)
-                        .foregroundStyle(Obsidian.muted)
+                    Text(message).font(.footnote).foregroundStyle(Obsidian.muted)
                 }
-                Text("没有账号。记录不会上传，也不作为样本收集。这是计时工具，不承诺医疗或健康效果。")
-                    .font(.footnote)
-                    .foregroundStyle(Obsidian.faint)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 8)
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "lock").font(.footnote)
+                    Text("记录只保存在这台手机上。没有账号，也不会上传。")
+                        .font(.footnote).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("local-records-footer")
+                }
+                .foregroundStyle(Obsidian.muted)
             }
-            .padding(.horizontal, 22)
-            .padding(.top, 12)
-            .padding(.bottom, 24)
+            .foregroundStyle(Obsidian.silver)
+            .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 32)
         }
-        .safeAreaInset(edge: .bottom) {
-            AppTabBar(section: $section)
-                .padding(.horizontal, 22)
-                .padding(.bottom, 8)
-                .background(Obsidian.background.opacity(0.94))
-        }
+        .scrollIndicators(.hidden)
         .sheet(isPresented: $editingStart) {
             startEditor
         }
@@ -128,11 +118,36 @@ struct SettingsView: View {
         }
     }
 
-    private func sectionTitle(_ title: String) -> some View {
-        Text(title)
-            .font(.caption.weight(.semibold))
-            .tracking(1.5)
-            .foregroundStyle(Obsidian.faint)
+    private func settingsGroup<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title).font(.caption.weight(.medium)).foregroundStyle(Obsidian.muted)
+                .padding(.leading, 2)
+            VStack(alignment: .leading, spacing: 12, content: content)
+                .padding(.horizontal, 18).padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Obsidian.buttonFill, in: RoundedRectangle(cornerRadius: 18))
+        }
+    }
+
+    private var rowDivider: some View {
+        Rectangle().fill(Obsidian.line.opacity(0.7)).frame(height: 0.5)
+    }
+
+    private func actionRow(_ title: String, symbol: String, destructive: Bool = false,
+                           action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: symbol).font(.system(size: 18, weight: .light)).frame(width: 23)
+                Text(title).font(.body).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Obsidian.muted)
+            }
+            .foregroundStyle(destructive ? Obsidian.lava : Obsidian.silver)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private var reminderBinding: Binding<Bool> {
@@ -293,11 +308,11 @@ struct ObsidianButtonStyle: ButtonStyle {
             .padding(.vertical, 14)
             .padding(.horizontal, 16)
             .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Obsidian.buttonFill)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(Color(white: 0.24), lineWidth: 1)
             )
             .opacity(configuration.isPressed ? 0.7 : 1)

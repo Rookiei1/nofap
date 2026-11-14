@@ -8,6 +8,8 @@ iPhone 上的持续计时。从开始的那一秒算起，精确到秒。确认�
 
 界面是黑底、冷银色数字和少量红色刻度。主按钮是「重新开始」。
 
+天数使用随 App 打包的 Six Caps 字体（SIL Open Font License，见 `NoFap/Fonts/OFL.txt`），无需联网加载。三个页面共用固定的底部导航，内容可独立滚动。
+
 ## 开发
 
 工程由 `project.yml` 经 XcodeGen 生成。最低系统 iOS 17，用 Xcode 26 和 iOS 26 SDK 编译上传。

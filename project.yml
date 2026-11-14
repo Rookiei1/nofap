@@ -23,6 +23,8 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDevelopmentRegion: zh-Hans
         ITSAppUsesNonExemptEncryption: false
+        UIAppFonts:
+          - SixCaps.ttf
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.rookiei1.nofap
