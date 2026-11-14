@@ -46,10 +46,14 @@ struct HomeView: View {
             let _ = context.date
             let now = Date()
             let components = store.components(at: now)
-            ViewThatFits(in: .vertical) {
-                page(components: components, now: now, compact: false)
-                ScrollView {
-                    page(components: components, now: now, compact: true)
+            GeometryReader { geo in
+                let daySize = dayFontSize(in: geo.size)
+                let hero = heroHeight(in: geo.size, daySize: daySize)
+                ViewThatFits(in: .vertical) {
+                    page(components: components, now: now, daySize: daySize, heroHeight: hero, fills: true)
+                    ScrollView {
+                        page(components: components, now: now, daySize: daySize, heroHeight: hero, fills: false)
+                    }
                 }
             }
         }
@@ -75,13 +79,13 @@ struct HomeView: View {
         }
     }
 
-    private func page(components: ElapsedComponents, now: Date, compact: Bool) -> some View {
-        VStack(alignment: .leading, spacing: compact ? 10 : 16) {
+    private func page(components: ElapsedComponents, now: Date, daySize: CGFloat, heroHeight: CGFloat, fills: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
             header
-            dayBlock(components, compact: compact)
-            timeBlock(components, compact: compact)
+            dayBlock(components, daySize: daySize, heroHeight: heroHeight)
+            timeBlock(components)
             Text(ElapsedTime.startCaption(start: store.currentStart, now: now))
-                .font(.system(size: metric(13, compact: compact)))
+                .font(.system(size: 14))
                 .foregroundStyle(Obsidian.muted)
             if components.clockBehind {
                 Text("系统时间早于开始时间，显示停在 000。校正后会按原来的开始时间继续。")
@@ -97,7 +101,7 @@ struct HomeView: View {
             }
             restartButton
             Text("新的一轮，从此刻开始")
-                .font(.system(size: metric(13, compact: compact)))
+                .font(.system(size: 14))
                 .foregroundStyle(Obsidian.faint)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if store.undo != nil && !hideUndoHint {
@@ -111,7 +115,7 @@ struct HomeView: View {
         .padding(.horizontal, 22)
         .padding(.top, 6)
         .padding(.bottom, 8)
-        .frame(maxWidth: .infinity, maxHeight: compact ? nil : .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: fills ? .infinity : nil, alignment: .topLeading)
     }
 
     private var header: some View {
@@ -123,8 +127,8 @@ struct HomeView: View {
                         .tracking(5)
                         .foregroundStyle(Obsidian.silver)
                     Text("/")
-                        .font(.system(size: 18, weight: .light))
-                        .foregroundStyle(Obsidian.silver.opacity(0.85))
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(Obsidian.lava)
                 }
                 Text("掌控此刻")
                     .font(.system(size: 13, weight: .regular))
@@ -145,44 +149,47 @@ struct HomeView: View {
         }
     }
 
-    private func dayBlock(_ components: ElapsedComponents, compact: Bool) -> some View {
-        HStack(alignment: .top, spacing: 0) {
+    private func dayBlock(_ components: ElapsedComponents, daySize: CGFloat, heroHeight: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            TimeSpine(days: components.days, reduceMotion: reduceMotion)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilitySortPriority(0)
             VStack(alignment: .leading, spacing: 0) {
                 Text(ElapsedTime.dayText(components.days))
-                    .font(.system(size: metric(132, compact: compact), weight: .black))
+                    .font(.system(size: daySize, weight: .black))
+                    .tracking(daySize > 120 ? -6 : -3)
                     .foregroundStyle(Obsidian.metal)
-                    .minimumScaleFactor(0.45)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                     .accessibilityHidden(true)
                 Text("DAYS")
-                    .font(.system(size: metric(13, compact: compact), weight: .medium))
+                    .font(.system(size: 14, weight: .medium))
                     .tracking(4)
                     .foregroundStyle(Obsidian.muted)
                     .padding(.top, 2)
                 Text(components.clockBehind ? "已坚持 0 天" : "已坚持 \(components.days) 天")
-                    .font(.system(size: metric(16, compact: compact), weight: .regular))
+                    .font(.system(size: 17, weight: .regular))
                     .foregroundStyle(Obsidian.silver.opacity(0.92))
                     .padding(.top, 6)
             }
+            .padding(.trailing, 52)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(components.spoken)
-            Spacer(minLength: 8)
-            TimeSpine(days: components.days, reduceMotion: reduceMotion)
-                .frame(width: 108, height: metric(210, compact: compact))
         }
+        .frame(height: heroHeight)
     }
 
-    private func timeBlock(_ components: ElapsedComponents, compact: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private func timeBlock(_ components: ElapsedComponents) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
             Text("连续计时")
-                .font(.system(size: metric(13, compact: compact)))
+                .font(.system(size: 14))
                 .foregroundStyle(Obsidian.muted)
             HStack(alignment: .top, spacing: 0) {
-                timeColumn(value: components.hours, unit: "时", size: metric(54, compact: compact))
-                colon(size: metric(48, compact: compact))
-                timeColumn(value: components.minutes, unit: "分", size: metric(54, compact: compact))
-                colon(size: metric(48, compact: compact))
-                timeColumn(value: components.seconds, unit: "秒", size: metric(54, compact: compact))
+                timeColumn(value: components.hours, unit: "时", size: 52)
+                colon(size: 46)
+                timeColumn(value: components.minutes, unit: "分", size: 52)
+                colon(size: 46)
+                timeColumn(value: components.seconds, unit: "秒", size: 52)
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(components.clockText)
@@ -246,6 +253,7 @@ struct HomeView: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("restart-button")
         .accessibilityHint("确认后从零开始新的一轮，并把上一轮记入轨迹")
         .padding(.top, 6)
     }
@@ -271,19 +279,18 @@ struct HomeView: View {
         }
     }
 
-    private func metric(_ base: CGFloat, compact: Bool) -> CGFloat {
-        let compactFactor: CGFloat = compact ? 0.78 : 1
-        let typeFactor: CGFloat
-        switch typeSize {
-        case .xSmall: typeFactor = 0.86
-        case .small: typeFactor = 0.93
-        case .medium, .large: typeFactor = 1
-        case .xLarge: typeFactor = 1.06
-        case .xxLarge: typeFactor = 1.12
-        case .xxxLarge: typeFactor = 1.16
-        default: typeFactor = 1.04
+    private func dayFontSize(in size: CGSize) -> CGFloat {
+        let widthFit = size.width * 0.42
+        let heightFit = size.height * 0.20
+        let base = min(168, max(96, min(widthFit, heightFit)))
+        if typeSize.isAccessibilitySize {
+            return min(base, 120)
         }
-        return base * compactFactor * typeFactor
+        return base
+    }
+
+    private func heroHeight(in size: CGSize, daySize: CGFloat) -> CGFloat {
+        min(max(daySize * 1.35, 230), size.height * 0.46)
     }
 }
 

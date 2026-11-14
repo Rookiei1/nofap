@@ -47,6 +47,7 @@ targets:
       gatherCoverageData: false
       testTargets:
         - NoFapTests
+        - NoFapUITests
   NoFapTests:
     type: bundle.unit-test
     platform: iOS
@@ -59,3 +60,16 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.rookiei1.nofap.tests
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGNING_ALLOWED: NO
+  NoFapUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: NoFap
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rookiei1.nofap.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGNING_ALLOWED: NO
+        TEST_TARGET_NAME: NoFap
